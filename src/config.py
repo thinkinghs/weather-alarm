@@ -74,13 +74,12 @@ def load_config() -> Config:
         airkorea_api_key=os.environ["AIRKOREA_API_KEY"],
         line_channel_access_token=os.environ["LINE_CHANNEL_ACCESS_TOKEN"],
         line_user_id=os.environ["LINE_USER_ID"],
-        location_nx=int(os.environ.get("LOCATION_NX", "61")),
-        location_ny=int(os.environ.get("LOCATION_NY", "120")),
-        sido_name=os.environ.get("SIDO_NAME", "경기"),
-        station_name=os.environ.get("STATION_NAME", "서현동"),
-        location_display_name=os.environ.get(
-            "LOCATION_DISPLAY_NAME", "경기도 성남시 분당구"
-        ),
+        location_nx=int(os.environ.get("LOCATION_NX") or "61"),
+        location_ny=int(os.environ.get("LOCATION_NY") or "120"),
+        sido_name=os.environ.get("SIDO_NAME") or "경기",
+        station_name=os.environ.get("STATION_NAME") or "서현동",
+        location_display_name=os.environ.get("LOCATION_DISPLAY_NAME")
+        or "경기도 성남시 분당구",
     )
 
     logger = logging.getLogger(__name__)
