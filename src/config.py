@@ -43,7 +43,7 @@ class Config:
     kma_api_key: str
     airkorea_api_key: str
     line_channel_access_token: str
-    line_user_id: str
+    line_user_ids: list[str]
     location_nx: int
     location_ny: int
     sido_name: str
@@ -61,7 +61,7 @@ def load_config() -> Config:
         "KMA_API_KEY",
         "AIRKOREA_API_KEY",
         "LINE_CHANNEL_ACCESS_TOKEN",
-        "LINE_USER_ID",
+        "LINE_USER_IDS",
     ]
     missing = [key for key in required_keys if not os.environ.get(key)]
     if missing:
@@ -69,11 +69,17 @@ def load_config() -> Config:
             f"Missing required environment variables: {', '.join(missing)}"
         )
 
+    user_ids = [
+        uid.strip()
+        for uid in os.environ["LINE_USER_IDS"].split(",")
+        if uid.strip()
+    ]
+
     config = Config(
         kma_api_key=os.environ["KMA_API_KEY"],
         airkorea_api_key=os.environ["AIRKOREA_API_KEY"],
         line_channel_access_token=os.environ["LINE_CHANNEL_ACCESS_TOKEN"],
-        line_user_id=os.environ["LINE_USER_ID"],
+        line_user_ids=user_ids,
         location_nx=int(os.environ.get("LOCATION_NX") or "61"),
         location_ny=int(os.environ.get("LOCATION_NY") or "120"),
         sido_name=os.environ.get("SIDO_NAME") or "경기",
@@ -84,9 +90,10 @@ def load_config() -> Config:
 
     logger = logging.getLogger(__name__)
     logger.info(
-        "Config loaded — kma=%s airkorea=%s line_token=%s",
+        "Config loaded — kma=%s airkorea=%s line_token=%s recipients=%d",
         mask_secret(config.kma_api_key),
         mask_secret(config.airkorea_api_key),
         mask_secret(config.line_channel_access_token),
+        len(config.line_user_ids),
     )
     return config

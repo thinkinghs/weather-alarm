@@ -41,7 +41,7 @@ def run() -> None:
         config.kma_api_key,
         config.airkorea_api_key,
         config.line_channel_access_token,
-        config.line_user_id,
+        *config.line_user_ids,
     ])
 
     errors: list[str] = []
@@ -66,11 +66,11 @@ def run() -> None:
 
     if errors or weather is None or air is None:
         error_text = format_error_message("\n".join(errors) if errors else "알 수 없는 오류")
-        send_message(config.line_channel_access_token, config.line_user_id, error_text)
+        send_message(config.line_channel_access_token, config.line_user_ids, error_text)
         sys.exit(1)
 
     message = format_message(weather, air, air, config.location_display_name)
-    success = send_message(config.line_channel_access_token, config.line_user_id, message)
+    success = send_message(config.line_channel_access_token, config.line_user_ids, message)
 
     if not success:
         logger.error("LINE 메시지 발송 실패")

@@ -8,19 +8,19 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-_LINE_PUSH_URL = "https://api.line.me/v2/bot/message/push"
+_LINE_MULTICAST_URL = "https://api.line.me/v2/bot/message/multicast"
 _TIMEOUT = 10       # seconds
 _MAX_RETRIES = 3
 
 
-def send_message(token: str, user_id: str, text: str) -> bool:
-    """LINE Push Message를 발송한다.
+def send_message(token: str, user_ids: list[str], text: str) -> bool:
+    """LINE Multicast API로 메시지를 발송한다.
 
     응답 바디를 로깅하지 않는다 (헤더에 토큰 정보가 포함될 수 있음).
 
     Args:
         token: LINE Channel Access Token.
-        user_id: 수신자 LINE User ID.
+        user_ids: 수신자 LINE User ID 목록 (최대 500명).
         text: 발송할 메시지 본문.
 
     Returns:
@@ -31,7 +31,7 @@ def send_message(token: str, user_id: str, text: str) -> bool:
         "Content-Type": "application/json",
     }
     payload = {
-        "to": user_id,
+        "to": user_ids,
         "messages": [{"type": "text", "text": text}],
     }
 
@@ -39,14 +39,18 @@ def send_message(token: str, user_id: str, text: str) -> bool:
     for attempt in range(_MAX_RETRIES):
         try:
             resp = requests.post(
-                _LINE_PUSH_URL,
+                _LINE_MULTICAST_URL,
                 headers=headers,
                 json=payload,
                 timeout=_TIMEOUT,
             )
             resp.raise_for_status()
             # status code만 로깅 (응답 바디 원문 로깅 금지)
-            logger.info("LINE message sent (status=%d)", resp.status_code)
+            logger.info(
+                "LINE message sent to %d recipient(s) (status=%d)",
+                len(user_ids),
+                resp.status_code,
+            )
             return True
         except requests.HTTPError as exc:
             status = (
