@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from .air_quality import AirQualityData
+from .air_quality import AirForecastData, AirQualityData
 from .weather import WeatherData
 
 KST = timezone(timedelta(hours=9))
@@ -48,8 +48,8 @@ def _sky_emoji(sky_code: str, pty_code: str) -> str:
     return _SKY_EMOJI.get(sky_code, "🌤")
 
 
-def _air_section(label: str, data: AirQualityData) -> str:
-    """오전/오후 공기질 섹션 문자열을 생성한다."""
+def _air_realtime_section(label: str, data: AirQualityData) -> str:
+    """실시간 측정값 공기질 섹션을 생성한다."""
     return (
         f"{label}\n"
         f"😷 미세먼지(PM10): {data.pm10}㎍/㎥ ({data.pm10_grade})\n"
@@ -58,10 +58,19 @@ def _air_section(label: str, data: AirQualityData) -> str:
     )
 
 
+def _air_forecast_section(label: str, data: AirForecastData) -> str:
+    """예보 등급 공기질 섹션을 생성한다 (수치 없이 등급만 표시)."""
+    return (
+        f"{label} (예보)\n"
+        f"😷 미세먼지(PM10): {data.pm10_grade}\n"
+        f"🫁 초미세먼지(PM2.5): {data.pm25_grade}"
+    )
+
+
 def format_message(
     weather: WeatherData,
     air_am: AirQualityData,
-    air_pm: AirQualityData,
+    air_pm: AirForecastData | None,
     location_name: str,
     _now: datetime | None = None,
 ) -> str:
@@ -69,6 +78,12 @@ def format_message(
     now = _now if _now is not None else datetime.now(KST)
     date_str = now.strftime("%Y.%m.%d")
     day_str = _DAY_KO[now.weekday()]
+
+    pm_section = (
+        _air_forecast_section("오후", air_pm)
+        if air_pm is not None
+        else "오후 (예보)\n정보를 가져올 수 없습니다."
+    )
 
     return (
         f"🌅 오늘의 날씨\n"
@@ -85,9 +100,9 @@ def format_message(
         f"☔ 강수확률: {weather.precipitation_prob}%\n"
         f"\n"
         f"[공기질]\n"
-        f"{_air_section('오전', air_am)}\n"
+        f"{_air_realtime_section('오전', air_am)}\n"
         f"\n"
-        f"{_air_section('오후', air_pm)}"
+        f"{pm_section}"
     )
 
 
