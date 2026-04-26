@@ -1,0 +1,43 @@
+name: Daily Weather Briefing
+
+on:
+  schedule:
+    # UTC 22:00 = KST 07:00 (다음날)
+    - cron: '0 22 * * *'
+  # 수동 실행 트리거
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  send-briefing:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install dependencies
+        run: uv sync --no-dev
+
+      - name: Send daily briefing
+        # 시크릿은 GitHub이 자동 마스킹하지만,
+        # 변형·조합 변수는 마스킹되지 않으므로 절대 가공하여 echo하지 말 것
+        env:
+          KMA_API_KEY: ${{ secrets.KMA_API_KEY }}
+          AIRKOREA_API_KEY: ${{ secrets.AIRKOREA_API_KEY }}
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
+          LOCATION_NX: ${{ vars.LOCATION_NX }}
+          LOCATION_NY: ${{ vars.LOCATION_NY }}
+          SIDO_NAME: ${{ vars.SIDO_NAME }}
+          STATION_NAME: ${{ vars.STATION_NAME }}
+          LOCATION_DISPLAY_NAME: ${{ vars.LOCATION_DISPLAY_NAME }}
+        run: uv run python -m src.main
