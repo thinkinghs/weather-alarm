@@ -123,8 +123,10 @@ def fetch_air_quality(
         None,
     )
     if station_data is None:
+        available = [item.get("stationName", "") for item in items]
         raise ValueError(
-            f"Station '{station_name}' not found in '{sido_name}' response"
+            f"Station '{station_name}' not found in '{sido_name}' response. "
+            f"Available stations: {available}"
         )
 
     pm10 = _safe_int(station_data.get("pm10Value"))
