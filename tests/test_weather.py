@@ -95,6 +95,9 @@ class TestFetchWeather(unittest.TestCase):
             {"fcstDate": "20260426", "fcstTime": "0700", "category": "PTY",  "fcstValue": "0"},
             {"fcstDate": "20260426", "fcstTime": "0600", "category": "POP",  "fcstValue": "10"},
             {"fcstDate": "20260426", "fcstTime": "0700", "category": "POP",  "fcstValue": "20"},
+            {"fcstDate": "20260426", "fcstTime": "1200", "category": "POP",  "fcstValue": "40"},
+            {"fcstDate": "20260426", "fcstTime": "1500", "category": "POP",  "fcstValue": "60"},
+            {"fcstDate": "20260426", "fcstTime": "1800", "category": "POP",  "fcstValue": "50"},
             {"fcstDate": "20260426", "fcstTime": "0700", "category": "WSD",  "fcstValue": "3.2"},
             {"fcstDate": "20260426", "fcstTime": "0700", "category": "REH",  "fcstValue": "55"},
         ]
@@ -121,7 +124,8 @@ class TestFetchWeather(unittest.TestCase):
         self.assertEqual(result.max_temp, 23.0)
         self.assertEqual(result.sky_code, "3")
         self.assertEqual(result.pty_code, "0")
-        self.assertEqual(result.precipitation_prob, 20)  # max of [10, 20]
+        self.assertEqual(result.precipitation_prob, 60)   # max of all POPs
+        self.assertEqual(result.afternoon_precipitation_prob, 60)  # max of 1200/1500/1800
         self.assertAlmostEqual(result.wind_speed, 3.2)
         self.assertEqual(result.humidity, 55)
         self.assertEqual(result.forecast_date, "20260426")

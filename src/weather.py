@@ -24,15 +24,16 @@ _MAX_RETRIES = 3
 
 @dataclass
 class WeatherData:
-    current_temp: float      # °C
-    min_temp: float          # °C
-    max_temp: float          # °C
-    sky_code: str            # 1=맑음, 3=구름많음, 4=흐림
-    pty_code: str            # 0=없음, 1=비, 2=비/눈, 3=눈, 4=소나기
-    precipitation_prob: int  # %
-    wind_speed: float        # m/s
-    humidity: int            # %
-    forecast_date: str       # YYYYMMDD
+    current_temp: float               # °C
+    min_temp: float                   # °C
+    max_temp: float                   # °C
+    sky_code: str                     # 1=맑음, 3=구름많음, 4=흐림
+    pty_code: str                     # 0=없음, 1=비, 2=비/눈, 3=눈, 4=소나기
+    precipitation_prob: int           # 하루 최대 강수확률 %
+    afternoon_precipitation_prob: int # 오후(12~18시) 최대 강수확률 %
+    wind_speed: float                 # m/s
+    humidity: int                     # %
+    forecast_date: str                # YYYYMMDD
 
 
 def _get_base_time(now: datetime) -> str:
@@ -149,6 +150,13 @@ def fetch_weather(
         for i in today_items
         if i["category"] == "POP" and i["fcstValue"].lstrip("-").isdigit()
     ]
+    afternoon_pops = [
+        int(i["fcstValue"])
+        for i in today_items
+        if i["category"] == "POP"
+        and i["fcstValue"].lstrip("-").isdigit()
+        and i["fcstTime"] in ("1200", "1500", "1800")
+    ]
 
     return WeatherData(
         current_temp=float(_fcst_value(today_items, "TMP", hour_str) or 0),
@@ -157,6 +165,7 @@ def fetch_weather(
         sky_code=_fcst_value(today_items, "SKY", hour_str) or "1",
         pty_code=_fcst_value(today_items, "PTY", hour_str) or "0",
         precipitation_prob=max(pops) if pops else 0,
+        afternoon_precipitation_prob=max(afternoon_pops) if afternoon_pops else 0,
         wind_speed=float(_fcst_value(today_items, "WSD", hour_str) or 0),
         humidity=int(_fcst_value(today_items, "REH", hour_str) or 0),
         forecast_date=today,

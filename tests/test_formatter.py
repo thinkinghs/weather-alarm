@@ -4,9 +4,8 @@ from __future__ import annotations
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from src.air_quality import AirForecastData, AirQualityData
+from src.air_quality import AirQualityData
 from src.formatter import (
-    _air_forecast_section,
     _air_realtime_section,
     _sky_description,
     _sky_emoji,
@@ -26,6 +25,7 @@ def _sample_weather() -> WeatherData:
         sky_code="3",
         pty_code="0",
         precipitation_prob=20,
+        afternoon_precipitation_prob=60,
         wind_speed=3.2,
         humidity=55,
         forecast_date="20260426",
@@ -43,13 +43,6 @@ def _sample_air() -> AirQualityData:
         measured_at="2026-04-26 07:00",
     )
 
-
-def _sample_forecast() -> AirForecastData:
-    return AirForecastData(
-        pm10_grade="나쁨",
-        pm25_grade="보통",
-        forecast_date="2026-04-26",
-    )
 
 
 class TestSkyDescription(unittest.TestCase):
@@ -104,21 +97,6 @@ class TestAirRealtimeSection(unittest.TestCase):
         self.assertIn("통합대기지수", section)
 
 
-class TestAirForecastSection(unittest.TestCase):
-    def test_section_contains_label_and_forecast(self) -> None:
-        section = _air_forecast_section("오후", _sample_forecast())
-        self.assertIn("오후", section)
-        self.assertIn("예보", section)
-
-    def test_section_contains_pm10_grade_only(self) -> None:
-        section = _air_forecast_section("오후", _sample_forecast())
-        self.assertIn("나쁨", section)
-        self.assertNotIn("㎍/㎥", section)  # 수치 없음
-
-    def test_section_contains_pm25_grade(self) -> None:
-        section = _air_forecast_section("오후", _sample_forecast())
-        self.assertIn("보통", section)
-
 
 class TestFormatMessage(unittest.TestCase):
     def setUp(self) -> None:
@@ -126,7 +104,6 @@ class TestFormatMessage(unittest.TestCase):
         self._msg = format_message(
             _sample_weather(),
             _sample_air(),
-            _sample_forecast(),
             "경기도 성남시 분당구",
             _now=self._now,
         )
@@ -157,27 +134,11 @@ class TestFormatMessage(unittest.TestCase):
     def test_contains_am_label(self) -> None:
         self.assertIn("오전", self._msg)
 
-    def test_contains_pm_forecast_label(self) -> None:
-        self.assertIn("오후 (예보)", self._msg)
-
     def test_am_has_numeric_value(self) -> None:
         self.assertIn("35㎍/㎥", self._msg)
 
-    def test_pm_has_no_numeric_value(self) -> None:
-        # 오후 예보 섹션에는 수치 없음
-        lines = self._msg.split("\n")
-        pm_lines = [l for l in lines if "오후" in l or (
-            any("오후" in prev for prev in lines[:lines.index(l)])
-            and "오전" not in l
-        )]
-        forecast_part = self._msg.split("오후 (예보)")[1] if "오후 (예보)" in self._msg else ""
-        self.assertNotIn("㎍/㎥", forecast_part)
-
-    def test_none_forecast_shows_fallback(self) -> None:
-        msg = format_message(
-            _sample_weather(), _sample_air(), None, "서울", _now=self._now
-        )
-        self.assertIn("정보를 가져올 수 없습니다", msg)
+    def test_contains_afternoon_precipitation(self) -> None:
+        self.assertIn("오후 60%", self._msg)
 
     def test_rain_day_uses_rain_description(self) -> None:
         weather = WeatherData(
@@ -187,13 +148,12 @@ class TestFormatMessage(unittest.TestCase):
             sky_code="4",
             pty_code="1",
             precipitation_prob=80,
+            afternoon_precipitation_prob=80,
             wind_speed=2.0,
             humidity=80,
             forecast_date="20260426",
         )
-        msg = format_message(
-            weather, _sample_air(), _sample_forecast(), "서울", _now=self._now
-        )
+        msg = format_message(weather, _sample_air(), "서울", _now=self._now)
         self.assertIn("비", msg)
 
 
