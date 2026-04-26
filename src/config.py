@@ -77,7 +77,7 @@ def load_config() -> Config:
         location_nx=int(os.environ.get("LOCATION_NX") or "61"),
         location_ny=int(os.environ.get("LOCATION_NY") or "120"),
         sido_name=os.environ.get("SIDO_NAME") or "경기",
-        station_name=os.environ.get("STATION_NAME") or "서현동",
+        station_name=os.environ.get("STATION_NAME") or "정자동",
         location_display_name=os.environ.get("LOCATION_DISPLAY_NAME")
         or "경기도 성남시 분당구",
     )
