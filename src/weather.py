@@ -127,16 +127,28 @@ def fetch_weather(
         "ny": ny,
     })
 
-    items: list[dict[str, str]] = data["response"]["body"]["items"]["item"]
+    raw = data["response"]["body"]["items"]["item"]
+    # 단일 결과는 dict로 반환되는 경우가 있어 list로 정규화
+    items: list[dict[str, str]] = raw if isinstance(raw, list) else [raw]
     today_items = [i for i in items if i["fcstDate"] == today]
+
+    logger.info(
+        "Weather fetched: date=%s base_time=%s total_items=%d today_items=%d",
+        today, base_time, len(items), len(today_items),
+    )
+
+    if not today_items:
+        raise ValueError(
+            f"No forecast items found for today={today} "
+            f"(base_date={base_date}, base_time={base_time}). "
+            f"Available dates: {sorted({i['fcstDate'] for i in items})}"
+        )
 
     pops = [
         int(i["fcstValue"])
         for i in today_items
         if i["category"] == "POP" and i["fcstValue"].lstrip("-").isdigit()
     ]
-
-    logger.info("Weather fetched: date=%s base_time=%s nx=%d ny=%d", today, base_time, nx, ny)
 
     return WeatherData(
         current_temp=float(_fcst_value(today_items, "TMP", hour_str) or 0),
