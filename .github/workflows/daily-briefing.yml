@@ -2,8 +2,8 @@ name: Daily Weather Briefing
 
 on:
   schedule:
-    # UTC 22:00 = KST 07:00 (다음날)
-    - cron: '0 22 * * *'
+    # UTC 21:30 = KST 06:30 (다음날). GitHub Actions peak-time 지연(최대 30분)을 감안해 30분 일찍 트리거
+    - cron: '30 21 * * *'
   # 수동 실행 트리거
   workflow_dispatch:
 

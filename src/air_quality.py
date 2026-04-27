@@ -18,6 +18,8 @@ _REALTIME_URL = (
 )
 _TIMEOUT = 10
 _MAX_RETRIES = 3
+_EMPTY_RETRY_WAIT = 300  # 빈 데이터 재시도 간격(초) — 아침 업데이트 대기용
+_EMPTY_MAX_RETRIES = 3  # 빈 데이터 최대 재시도 횟수
 
 
 @dataclass
@@ -101,21 +103,54 @@ def _call_with_retry(url: str, params: dict) -> dict:
     ) from last_exc
 
 
+def _fetch_items(api_key: str, sido_name: str) -> list[dict]:
+    """에어코리아 API를 호출해 items 목록을 반환한다. 빈 데이터면 재시도한다."""
+    params = {
+        "serviceKey": api_key,
+        "returnType": "json",
+        "numOfRows": 500,
+        "pageNo": 1,
+        "sidoName": sido_name,
+        "searchCondition": "HOUR",
+    }
+    for attempt in range(_EMPTY_MAX_RETRIES):
+        body = _call_with_retry(_REALTIME_URL, params)
+
+        header = body.get("response", {}).get("header", {})
+        result_code = header.get("resultCode", "")
+        if result_code != "00":
+            raise RuntimeError(
+                f"AirKorea API error: resultCode={result_code}, "
+                f"resultMsg={header.get('resultMsg', '')}"
+            )
+
+        items = body.get("response", {}).get("body", {}).get("items")
+        if items:
+            return items
+
+        if attempt < _EMPTY_MAX_RETRIES - 1:
+            logger.warning(
+                "AirKorea returned empty items (attempt %d/%d), "
+                "retrying in %ds — 데이터 업데이트 대기 중",
+                attempt + 1,
+                _EMPTY_MAX_RETRIES,
+                _EMPTY_RETRY_WAIT,
+            )
+            time.sleep(_EMPTY_RETRY_WAIT)
+
+    raise RuntimeError(
+        f"AirKorea API returned empty items after {_EMPTY_MAX_RETRIES} attempts "
+        f"for sido='{sido_name}'"
+    )
+
+
 def fetch_air_quality(
     api_key: str,
     sido_name: str,
     station_name: str,
 ) -> AirQualityData:
     """에어코리아 실시간 측정정보 API에서 특정 측정소 데이터를 조회한다."""
-    body = _call_with_retry(_REALTIME_URL, {
-        "serviceKey": api_key,
-        "returnType": "json",
-        "numOfRows": 100,
-        "pageNo": 1,
-        "sidoName": sido_name,
-        "searchCondition": "HOUR",
-    })
-    items = body["response"]["body"]["items"]
+    items = _fetch_items(api_key, sido_name)
 
     station_data = next(
         (item for item in items if item.get("stationName") == station_name),
