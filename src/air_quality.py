@@ -175,9 +175,12 @@ def _find_pm25_in_sido(api_key: str, sido_name: str) -> str | None:
             items = [items]
         pm25_values = [item.get("pm25Value", "") for item in items]
         valid_values = [v for v in pm25_values if v and v.strip() != "-"]
+        sample_keys = list(items[0].keys()) if items else []
+        sample_pm25 = items[0].get("pm25Value") if items else None
         logger.info(
-            "PM2.5 sido fallback: sido=%s total_stations=%d valid_pm25=%d",
-            sido_name, len(items), len(valid_values),
+            "PM2.5 sido fallback: sido=%s total_stations=%d valid_pm25=%d "
+            "sample_keys=%s sample_pm25=%s",
+            sido_name, len(items), len(valid_values), sample_keys, sample_pm25,
         )
         if valid_values:
             for item in items:
