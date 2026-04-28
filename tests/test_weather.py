@@ -146,35 +146,41 @@ class TestFetchWeather(unittest.TestCase):
             fetch_weather("bad_key", 61, 120, _now=_kst(7, 0))
 
     @patch("src.weather.requests.get")
-    def test_tmn_tmx_fallback_to_tmp_minmax(self, mock_get: MagicMock) -> None:
-        """TMN/TMX가 없으면 TMP 최솟/최댓값으로 대체한다."""
-        items = [
-            {"fcstDate": "20260426", "fcstTime": "0700", "category": "TMP",  "fcstValue": "18"},
-            {"fcstDate": "20260426", "fcstTime": "0900", "category": "TMP",  "fcstValue": "21"},
-            {"fcstDate": "20260426", "fcstTime": "1200", "category": "TMP",  "fcstValue": "24"},
-            {"fcstDate": "20260426", "fcstTime": "1500", "category": "TMP",  "fcstValue": "25"},
-            {"fcstDate": "20260426", "fcstTime": "1800", "category": "TMP",  "fcstValue": "20"},
-            # TMN/TMX 없음
-            {"fcstDate": "20260426", "fcstTime": "0700", "category": "SKY",  "fcstValue": "1"},
-            {"fcstDate": "20260426", "fcstTime": "0700", "category": "PTY",  "fcstValue": "0"},
-            {"fcstDate": "20260426", "fcstTime": "0700", "category": "POP",  "fcstValue": "10"},
-            {"fcstDate": "20260426", "fcstTime": "0700", "category": "WSD",  "fcstValue": "2.0"},
-            {"fcstDate": "20260426", "fcstTime": "0700", "category": "REH",  "fcstValue": "60"},
+    def test_tmn_tmx_fetched_from_0200_when_missing(self, mock_get: MagicMock) -> None:
+        """TMN/TMX가 주 발표에 없으면 0200 발표로 재조회한다."""
+        primary_items = [
+            # TMN/TMX 없음 (오후 발표라 fcstTime=0600이 응답에 없음)
+            {"fcstDate": "20260426", "fcstTime": "1500", "category": "TMP",  "fcstValue": "22"},
+            {"fcstDate": "20260426", "fcstTime": "1500", "category": "SKY",  "fcstValue": "1"},
+            {"fcstDate": "20260426", "fcstTime": "1500", "category": "PTY",  "fcstValue": "0"},
+            {"fcstDate": "20260426", "fcstTime": "1500", "category": "POP",  "fcstValue": "10"},
+            {"fcstDate": "20260426", "fcstTime": "1500", "category": "WSD",  "fcstValue": "2.0"},
+            {"fcstDate": "20260426", "fcstTime": "1500", "category": "REH",  "fcstValue": "60"},
         ]
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {
-            "response": {
-                "header": {"resultCode": "00", "resultMsg": "NORMAL_SERVICE"},
-                "body": {"items": {"item": items}},
+        secondary_items = [
+            # 0200 발표 응답 — TMN/TMX 포함
+            {"fcstDate": "20260426", "fcstTime": "0600", "category": "TMN",  "fcstValue": "10"},
+            {"fcstDate": "20260426", "fcstTime": "1500", "category": "TMX",  "fcstValue": "25"},
+            {"fcstDate": "20260426", "fcstTime": "0600", "category": "TMP",  "fcstValue": "14"},
+        ]
+
+        def make_resp(items: list) -> MagicMock:
+            m = MagicMock()
+            m.json.return_value = {
+                "response": {
+                    "header": {"resultCode": "00", "resultMsg": "NORMAL_SERVICE"},
+                    "body": {"items": {"item": items}},
+                }
             }
-        }
-        mock_resp.raise_for_status.return_value = None
-        mock_get.return_value = mock_resp
+            m.raise_for_status.return_value = None
+            return m
 
-        result = fetch_weather("test_key", 61, 120, _now=_kst(7, 0))
+        mock_get.side_effect = [make_resp(primary_items), make_resp(secondary_items)]
 
-        self.assertEqual(result.min_temp, 18.0)  # TMP 최솟값
-        self.assertEqual(result.max_temp, 25.0)  # TMP 최댓값
+        result = fetch_weather("test_key", 61, 120, _now=_kst(15, 30, day=26))
+
+        self.assertEqual(result.min_temp, 10.0)  # 0200 발표 실제 TMN
+        self.assertEqual(result.max_temp, 25.0)  # 0200 발표 실제 TMX
 
     @patch("src.weather.time.sleep")
     @patch("src.weather.requests.get")

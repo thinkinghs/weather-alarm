@@ -98,6 +98,55 @@ def _call_api(api_key: str, params: dict[str, Any]) -> dict[str, Any]:
     ) from last_exc
 
 
+def _fetch_tmn_tmx(
+    api_key: str,
+    nx: int,
+    ny: int,
+    today: str,
+) -> tuple[float | None, float | None]:
+    """0200 발표 기준으로 오늘의 실제 TMN/TMX를 조회한다.
+
+    TMN/TMX는 0200 발표의 fcstDate=today, fcstTime=0600/1500에 항상 포함된다.
+    0200 발표가 아직 제공되지 않는 경우(새벽 0210 이전) 전날 2300 발표를 사용한다.
+    """
+    candidates = [("0200", today)]
+    # 전날 2300 발표는 base_date가 하루 전이지만 오늘(today) 예보를 포함한다
+    prev_date = (
+        datetime.strptime(today, "%Y%m%d") - timedelta(days=1)
+    ).strftime("%Y%m%d")
+    candidates.append(("2300", prev_date))
+
+    for base_time, base_date in candidates:
+        try:
+            data = _call_api(api_key, {
+                "pageNo": 1,
+                "numOfRows": 300,
+                "dataType": "JSON",
+                "base_date": base_date,
+                "base_time": base_time,
+                "nx": nx,
+                "ny": ny,
+            })
+            raw = data["response"]["body"]["items"]["item"]
+            items: list[dict[str, str]] = raw if isinstance(raw, list) else [raw]
+            today_items = [i for i in items if i["fcstDate"] == today]
+            tmn_raw = _fcst_value(today_items, "TMN")
+            tmx_raw = _fcst_value(today_items, "TMX")
+            if tmn_raw is not None and tmx_raw is not None:
+                logger.info(
+                    "TMN/TMX fetched from base_time=%s: TMN=%.1f TMX=%.1f",
+                    base_time, float(tmn_raw), float(tmx_raw),
+                )
+                return float(tmn_raw), float(tmx_raw)
+        except Exception as exc:
+            logger.warning(
+                "TMN/TMX fetch failed (base_time=%s): %s", base_time, exc
+            )
+
+    logger.warning("TMN/TMX unavailable from all base_times")
+    return None, None
+
+
 def fetch_weather(
     api_key: str,
     nx: int,
@@ -158,25 +207,13 @@ def fetch_weather(
         and i["fcstTime"] in ("1200", "1500", "1800")
     ]
 
-    # TMN/TMX는 발표 시각에 따라 today_items에 없을 수 있으므로 없으면 TMP 최솟/최댓값으로 대체
+    # TMN/TMX는 발표 시각에 따라 today_items에 없을 수 있으므로 0200 발표로 재조회
     min_temp_raw = _fcst_value(today_items, "TMN")
     max_temp_raw = _fcst_value(today_items, "TMX")
     if min_temp_raw is None or max_temp_raw is None:
-        tmps = [
-            float(i["fcstValue"])
-            for i in today_items
-            if i["category"] == "TMP"
-        ]
-        if min_temp_raw is None:
-            min_temp = min(tmps) if tmps else 0.0
-            logger.warning("TMN not in forecast, derived from TMP min: %.1f°C", min_temp)
-        else:
-            min_temp = float(min_temp_raw)
-        if max_temp_raw is None:
-            max_temp = max(tmps) if tmps else 0.0
-            logger.warning("TMX not in forecast, derived from TMP max: %.1f°C", max_temp)
-        else:
-            max_temp = float(max_temp_raw)
+        tmn, tmx = _fetch_tmn_tmx(api_key, nx, ny, today)
+        min_temp = tmn if tmn is not None else float(min_temp_raw or 0)
+        max_temp = tmx if tmx is not None else float(max_temp_raw or 0)
     else:
         min_temp = float(min_temp_raw)
         max_temp = float(max_temp_raw)
