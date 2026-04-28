@@ -145,6 +145,37 @@ class TestFetchWeather(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             fetch_weather("bad_key", 61, 120, _now=_kst(7, 0))
 
+    @patch("src.weather.requests.get")
+    def test_tmn_tmx_fallback_to_tmp_minmax(self, mock_get: MagicMock) -> None:
+        """TMN/TMX가 없으면 TMP 최솟/최댓값으로 대체한다."""
+        items = [
+            {"fcstDate": "20260426", "fcstTime": "0700", "category": "TMP",  "fcstValue": "18"},
+            {"fcstDate": "20260426", "fcstTime": "0900", "category": "TMP",  "fcstValue": "21"},
+            {"fcstDate": "20260426", "fcstTime": "1200", "category": "TMP",  "fcstValue": "24"},
+            {"fcstDate": "20260426", "fcstTime": "1500", "category": "TMP",  "fcstValue": "25"},
+            {"fcstDate": "20260426", "fcstTime": "1800", "category": "TMP",  "fcstValue": "20"},
+            # TMN/TMX 없음
+            {"fcstDate": "20260426", "fcstTime": "0700", "category": "SKY",  "fcstValue": "1"},
+            {"fcstDate": "20260426", "fcstTime": "0700", "category": "PTY",  "fcstValue": "0"},
+            {"fcstDate": "20260426", "fcstTime": "0700", "category": "POP",  "fcstValue": "10"},
+            {"fcstDate": "20260426", "fcstTime": "0700", "category": "WSD",  "fcstValue": "2.0"},
+            {"fcstDate": "20260426", "fcstTime": "0700", "category": "REH",  "fcstValue": "60"},
+        ]
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "response": {
+                "header": {"resultCode": "00", "resultMsg": "NORMAL_SERVICE"},
+                "body": {"items": {"item": items}},
+            }
+        }
+        mock_resp.raise_for_status.return_value = None
+        mock_get.return_value = mock_resp
+
+        result = fetch_weather("test_key", 61, 120, _now=_kst(7, 0))
+
+        self.assertEqual(result.min_temp, 18.0)  # TMP 최솟값
+        self.assertEqual(result.max_temp, 25.0)  # TMP 최댓값
+
     @patch("src.weather.time.sleep")
     @patch("src.weather.requests.get")
     def test_retries_on_network_error(

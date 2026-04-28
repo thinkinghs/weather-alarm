@@ -158,10 +158,33 @@ def fetch_weather(
         and i["fcstTime"] in ("1200", "1500", "1800")
     ]
 
+    # TMN/TMX는 발표 시각에 따라 today_items에 없을 수 있으므로 없으면 TMP 최솟/최댓값으로 대체
+    min_temp_raw = _fcst_value(today_items, "TMN")
+    max_temp_raw = _fcst_value(today_items, "TMX")
+    if min_temp_raw is None or max_temp_raw is None:
+        tmps = [
+            float(i["fcstValue"])
+            for i in today_items
+            if i["category"] == "TMP"
+        ]
+        if min_temp_raw is None:
+            min_temp = min(tmps) if tmps else 0.0
+            logger.warning("TMN not in forecast, derived from TMP min: %.1f°C", min_temp)
+        else:
+            min_temp = float(min_temp_raw)
+        if max_temp_raw is None:
+            max_temp = max(tmps) if tmps else 0.0
+            logger.warning("TMX not in forecast, derived from TMP max: %.1f°C", max_temp)
+        else:
+            max_temp = float(max_temp_raw)
+    else:
+        min_temp = float(min_temp_raw)
+        max_temp = float(max_temp_raw)
+
     return WeatherData(
         current_temp=float(_fcst_value(today_items, "TMP", hour_str) or 0),
-        min_temp=float(_fcst_value(today_items, "TMN") or 0),
-        max_temp=float(_fcst_value(today_items, "TMX") or 0),
+        min_temp=min_temp,
+        max_temp=max_temp,
         sky_code=_fcst_value(today_items, "SKY", hour_str) or "1",
         pty_code=_fcst_value(today_items, "PTY", hour_str) or "0",
         precipitation_prob=max(pops) if pops else 0,

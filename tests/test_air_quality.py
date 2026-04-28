@@ -83,33 +83,34 @@ class TestSafeInt(unittest.TestCase):
 
 
 class TestFetchAirQuality(unittest.TestCase):
-    def _api_response(self) -> dict:
+    def _api_response(self, items: list[dict] | None = None) -> dict:
+        """getMsrstnAcctoRltmMesureDnsty 응답 형식 (측정소 1곳의 시간별 데이터)."""
+        if items is None:
+            items = [
+                {
+                    "stationName": "서현동",
+                    "pm10Value": "35",
+                    "pm25Value": "18",
+                    "khaiValue": "65",
+                    "dataTime": "2026-04-26 07:00",
+                },
+                {
+                    "stationName": "서현동",
+                    "pm10Value": "38",
+                    "pm25Value": "20",
+                    "khaiValue": "68",
+                    "dataTime": "2026-04-26 06:00",
+                },
+            ]
         return {
             "response": {
                 "header": {"resultCode": "00"},
-                "body": {
-                    "items": [
-                        {
-                            "stationName": "서현동",
-                            "pm10Value": "35",
-                            "pm25Value": "18",
-                            "khaiValue": "65",
-                            "dataTime": "2026-04-26 07:00",
-                        },
-                        {
-                            "stationName": "다른측정소",
-                            "pm10Value": "50",
-                            "pm25Value": "25",
-                            "khaiValue": "80",
-                            "dataTime": "2026-04-26 07:00",
-                        },
-                    ]
-                },
+                "body": {"items": items},
             }
         }
 
     @patch("src.air_quality.requests.get")
-    def test_finds_correct_station(self, mock_get: MagicMock) -> None:
+    def test_parses_most_recent_measurement(self, mock_get: MagicMock) -> None:
         mock_resp = MagicMock()
         mock_resp.json.return_value = self._api_response()
         mock_resp.raise_for_status.return_value = None
@@ -127,14 +128,36 @@ class TestFetchAirQuality(unittest.TestCase):
         self.assertEqual(result.measured_at, "2026-04-26 07:00")
 
     @patch("src.air_quality.requests.get")
-    def test_station_not_found_raises(self, mock_get: MagicMock) -> None:
+    def test_pm25_fallback_to_recent_valid_value(self, mock_get: MagicMock) -> None:
+        """최신 시간 PM2.5가 '-'이면 이전 시간의 유효한 값을 사용한다."""
         mock_resp = MagicMock()
-        mock_resp.json.return_value = self._api_response()
+        mock_resp.json.return_value = self._api_response(items=[
+            {
+                "stationName": "서현동",
+                "pm10Value": "40",
+                "pm25Value": "-",    # 최신 시간 PM2.5 누락
+                "khaiValue": "70",
+                "dataTime": "2026-04-26 07:00",
+            },
+            {
+                "stationName": "서현동",
+                "pm10Value": "38",
+                "pm25Value": "22",   # 이전 시간에 유효한 PM2.5 존재
+                "khaiValue": "68",
+                "dataTime": "2026-04-26 06:00",
+            },
+        ])
         mock_resp.raise_for_status.return_value = None
         mock_get.return_value = mock_resp
 
-        with self.assertRaises(ValueError, msg="Station not found"):
-            fetch_air_quality("test_key", "경기", "없는측정소")
+        result = fetch_air_quality("test_key", "경기", "서현동")
+
+        # pm10/cai는 최신 시간값 사용
+        self.assertEqual(result.pm10, 40)
+        self.assertEqual(result.cai, 70)
+        # pm25는 이전 시간 유효값으로 fallback
+        self.assertEqual(result.pm25, 22)
+        self.assertEqual(result.pm25_grade, "보통")
 
     @patch("src.air_quality.time.sleep")
     @patch("src.air_quality.requests.get")
@@ -153,22 +176,15 @@ class TestFetchAirQuality(unittest.TestCase):
     def test_handles_invalid_measurement_values(self, mock_get: MagicMock) -> None:
         """측정값이 '-' 또는 None인 경우: pm10/cai는 0, pm25는 None으로 처리한다."""
         mock_resp = MagicMock()
-        mock_resp.json.return_value = {
-            "response": {
-                "header": {"resultCode": "00"},
-                "body": {
-                    "items": [
-                        {
-                            "stationName": "서현동",
-                            "pm10Value": "-",
-                            "pm25Value": None,
-                            "khaiValue": "N/A",
-                            "dataTime": "2026-04-26 07:00",
-                        }
-                    ]
-                },
+        mock_resp.json.return_value = self._api_response(items=[
+            {
+                "stationName": "서현동",
+                "pm10Value": "-",
+                "pm25Value": None,
+                "khaiValue": "N/A",
+                "dataTime": "2026-04-26 07:00",
             }
-        }
+        ])
         mock_resp.raise_for_status.return_value = None
         mock_get.return_value = mock_resp
 

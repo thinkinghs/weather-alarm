@@ -1,6 +1,6 @@
 """한국환경공단 에어코리아 API 클라이언트.
 
-- 실시간 측정정보: getCtprvnRltmMesureDnsty (오전 실측값)
+- 실시간 측정정보: getMsrstnAcctoRltmMesureDnsty (측정소별 최근 24시간)
 """
 from __future__ import annotations
 
@@ -12,9 +12,9 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-_REALTIME_URL = (
+_STATION_URL = (
     "http://apis.data.go.kr/B552584/ArpltnInforInqireSvc"
-    "/getCtprvnRltmMesureDnsty"
+    "/getMsrstnAcctoRltmMesureDnsty"
 )
 _TIMEOUT = 10
 _MAX_RETRIES = 3
@@ -103,18 +103,18 @@ def _call_with_retry(url: str, params: dict) -> dict:
     ) from last_exc
 
 
-def _fetch_items(api_key: str, sido_name: str) -> list[dict]:
-    """에어코리아 API를 호출해 items 목록을 반환한다. 빈 데이터면 재시도한다."""
+def _fetch_items(api_key: str, station_name: str) -> list[dict]:
+    """에어코리아 측정소별 API를 호출해 최근 24시간 items 목록을 반환한다."""
     params = {
         "serviceKey": api_key,
         "returnType": "json",
-        "numOfRows": 500,
+        "numOfRows": 24,
         "pageNo": 1,
-        "sidoName": sido_name,
-        "searchCondition": "HOUR",
+        "stationName": station_name,
+        "dataTerm": "DAILY",
     }
     for attempt in range(_EMPTY_MAX_RETRIES):
-        body = _call_with_retry(_REALTIME_URL, params)
+        body = _call_with_retry(_STATION_URL, params)
 
         header = body.get("response", {}).get("header", {})
         result_code = header.get("resultCode", "")
@@ -125,6 +125,9 @@ def _fetch_items(api_key: str, sido_name: str) -> list[dict]:
             )
 
         items = body.get("response", {}).get("body", {}).get("items")
+        # 단일 결과는 dict로 반환될 수 있으므로 list로 정규화
+        if isinstance(items, dict):
+            items = [items]
         if items:
             return items
 
@@ -140,7 +143,7 @@ def _fetch_items(api_key: str, sido_name: str) -> list[dict]:
 
     raise RuntimeError(
         f"AirKorea API returned empty items after {_EMPTY_MAX_RETRIES} attempts "
-        f"for sido='{sido_name}'"
+        f"for station='{station_name}'"
     )
 
 
@@ -149,25 +152,32 @@ def fetch_air_quality(
     sido_name: str,
     station_name: str,
 ) -> AirQualityData:
-    """에어코리아 실시간 측정정보 API에서 특정 측정소 데이터를 조회한다."""
-    items = _fetch_items(api_key, sido_name)
+    """에어코리아 측정소별 실시간 측정정보 API에서 특정 측정소 데이터를 조회한다.
 
-    station_data = next(
-        (item for item in items if item.get("stationName") == station_name),
-        None,
-    )
-    if station_data is None:
-        available = [item.get("stationName", "") for item in items]
-        raise ValueError(
-            f"Station '{station_name}' not found in '{sido_name}' response. "
-            f"Available stations: {available}"
-        )
+    최근 24시간 데이터를 조회해 PM2.5 등 미갱신 항목은 가장 최근 유효값을 사용한다.
+    sido_name은 에러 메시지용으로만 유지한다.
+    """
+    items = _fetch_items(api_key, station_name)
+
+    # 가장 최근 측정값(인덱스 0)을 기본 데이터로 사용
+    station_data = items[0]
+
+    # PM2.5는 시간별로 누락("-")될 수 있으므로 최근 24시간에서 유효한 첫 번째 값을 사용
+    pm25_raw: str | None = None
+    for item in items:
+        v = item.get("pm25Value", "")
+        if v and v.strip() != "-":
+            pm25_raw = v
+            break
 
     pm10 = _safe_int(station_data.get("pm10Value"))
-    pm25 = _parse_optional_int(station_data.get("pm25Value"))
+    pm25 = _parse_optional_int(pm25_raw)
     cai = _safe_int(station_data.get("khaiValue"))
 
-    logger.info("Air quality fetched: station=%s", station_name)
+    logger.info(
+        "Air quality fetched: station=%s pm10=%d pm25=%s",
+        station_name, pm10, pm25_raw or "-",
+    )
 
     return AirQualityData(
         pm10=pm10,
