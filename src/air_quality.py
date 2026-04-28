@@ -107,8 +107,8 @@ def _call_with_retry(url: str, params: dict) -> dict:
     ) from last_exc
 
 
-def _fetch_items(api_key: str, station_name: str) -> list[dict]:
-    """에어코리아 측정소별 API를 호출해 최근 24시간 items 목록을 반환한다."""
+def _fetch_station_items(api_key: str, station_name: str) -> list[dict]:
+    """getMsrstnAcctoRltmMesureDnsty로 특정 측정소의 최근 24시간 데이터를 반환한다."""
     params = {
         "serviceKey": api_key,
         "returnType": "json",
@@ -129,7 +129,6 @@ def _fetch_items(api_key: str, station_name: str) -> list[dict]:
             )
 
         items = body.get("response", {}).get("body", {}).get("items")
-        # 단일 결과는 dict로 반환될 수 있으므로 list로 정규화
         if isinstance(items, dict):
             items = [items]
         if items:
@@ -151,49 +150,57 @@ def _fetch_items(api_key: str, station_name: str) -> list[dict]:
     )
 
 
-def _find_pm25_in_sido(api_key: str, sido_name: str) -> str | None:
-    """시도 내 전체 측정소 중 PM2.5 유효값이 있는 첫 번째 측정소 값을 반환한다."""
-    params = {
-        "serviceKey": api_key,
-        "returnType": "json",
-        "numOfRows": 100,
-        "pageNo": 1,
-        "sidoName": sido_name,
-        "searchCondition": "HOUR",
-    }
-    try:
-        body = _call_with_retry(_SIDO_URL, params)
-        result_code = body.get("response", {}).get("header", {}).get("resultCode", "")
-        if result_code != "00":
-            logger.warning("PM2.5 sido fallback: API error resultCode=%s", result_code)
-            return None
-        items = body.get("response", {}).get("body", {}).get("items") or []
-        # 중첩 구조 정규화
-        if isinstance(items, dict):
-            items = items.get("item") or []
-        if isinstance(items, dict):
-            items = [items]
-        pm25_values = [item.get("pm25Value", "") for item in items]
-        valid_values = [v for v in pm25_values if v and v.strip() != "-"]
-        sample_keys = list(items[0].keys()) if items else []
-        sample_pm25 = items[0].get("pm25Value") if items else None
-        logger.info(
-            "PM2.5 sido fallback: sido=%s total_stations=%d valid_pm25=%d "
-            "sample_keys=%s sample_pm25=%s",
-            sido_name, len(items), len(valid_values), sample_keys, sample_pm25,
-        )
-        if valid_values:
-            for item in items:
-                v = item.get("pm25Value", "")
-                if v and v.strip() != "-":
-                    logger.info(
-                        "PM2.5 fallback: using station=%s value=%s",
-                        item.get("stationName"), v,
-                    )
-                    return v
-    except Exception as exc:
-        logger.warning("PM2.5 sido fallback failed: %s", exc)
+def _find_valid_pm25(items: list[dict]) -> str | None:
+    """측정 데이터 목록에서 유효한 첫 번째 PM2.5 값을 반환한다."""
+    for item in items:
+        v = item.get("pm25Value", "")
+        if v and v.strip() != "-":
+            return v
     return None
+
+
+def _fetch_pm25_from_any_sido_station(
+    api_key: str, sido_name: str, exclude_station: str
+) -> str | None:
+    """시도 내 임의 측정소 하나를 골라 PM2.5를 한 번 더 조회한다.
+
+    getCtprvnRltmMesureDnsty로 시도 측정소 목록을 가져온 뒤,
+    주 측정소가 아닌 곳 중 첫 번째를 getMsrstnAcctoRltmMesureDnsty로 재조회한다.
+    """
+    try:
+        # 시도 내 측정소 목록 확인 (PM10/CAI 포함, stationName 식별용)
+        body = _call_with_retry(_SIDO_URL, {
+            "serviceKey": api_key,
+            "returnType": "json",
+            "numOfRows": 20,
+            "pageNo": 1,
+            "sidoName": sido_name,
+            "searchCondition": "HOUR",
+        })
+        if body.get("response", {}).get("header", {}).get("resultCode") != "00":
+            return None
+        sido_items = body.get("response", {}).get("body", {}).get("items") or []
+
+        # 주 측정소 제외하고 다른 측정소 선택
+        fallback_station = next(
+            (item.get("stationName") for item in sido_items
+             if item.get("stationName") and item.get("stationName") != exclude_station),
+            None,
+        )
+        if not fallback_station:
+            return None
+
+        # 해당 측정소의 PM2.5 조회
+        logger.info("PM2.5 fallback: trying station=%s", fallback_station)
+        fallback_items = _fetch_station_items(api_key, fallback_station)
+        pm25_raw = _find_valid_pm25(fallback_items)
+        if pm25_raw:
+            logger.info("PM2.5 fallback: station=%s value=%s", fallback_station, pm25_raw)
+        return pm25_raw
+
+    except Exception as exc:
+        logger.warning("PM2.5 fallback failed: %s", exc)
+        return None
 
 
 def fetch_air_quality(
@@ -203,24 +210,17 @@ def fetch_air_quality(
 ) -> AirQualityData:
     """에어코리아 측정소별 실시간 측정정보 API에서 특정 측정소 데이터를 조회한다.
 
-    PM2.5가 24시간 내 모두 누락("-")이면 시도 내 다른 측정소에서 fallback으로 가져온다.
+    PM2.5가 24시간 내 없으면 시도 내 다른 측정소로 한 번 더 조회한다.
+    그래도 없으면 측정없음으로 처리한다.
     """
-    items = _fetch_items(api_key, station_name)
-
-    # 가장 최근 측정값(인덱스 0)을 기본 데이터로 사용
+    items = _fetch_station_items(api_key, station_name)
     station_data = items[0]
 
-    # PM2.5는 시간별로 누락("-")될 수 있으므로 최근 24시간에서 유효한 첫 번째 값을 사용
-    pm25_raw: str | None = None
-    for item in items:
-        v = item.get("pm25Value", "")
-        if v and v.strip() != "-":
-            pm25_raw = v
-            break
+    pm25_raw = _find_valid_pm25(items)
 
-    # 24시간 내 PM2.5가 모두 없으면 시도 전체 측정소에서 fallback 탐색
+    # PM2.5 없으면 시도 내 다른 측정소로 한 번 더 시도
     if pm25_raw is None and sido_name:
-        pm25_raw = _find_pm25_in_sido(api_key, sido_name)
+        pm25_raw = _fetch_pm25_from_any_sido_station(api_key, sido_name, station_name)
 
     pm10 = _safe_int(station_data.get("pm10Value"))
     pm25 = _parse_optional_int(pm25_raw)
@@ -240,5 +240,3 @@ def fetch_air_quality(
         cai_grade=_cai_grade(cai),
         measured_at=station_data.get("dataTime", ""),
     )
-
-
