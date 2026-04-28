@@ -116,6 +116,7 @@ def _fetch_station_items(api_key: str, station_name: str) -> list[dict]:
         "pageNo": 1,
         "stationName": station_name,
         "dataTerm": "DAILY",
+        "ver": "1.3",  # PM2.5(pm25Value) 포함 버전
     }
     for attempt in range(_EMPTY_MAX_RETRIES):
         body = _call_with_retry(_STATION_URL, params)
@@ -132,10 +133,6 @@ def _fetch_station_items(api_key: str, station_name: str) -> list[dict]:
         if isinstance(items, dict):
             items = [items]
         if items:
-            logger.info(
-                "Station API response keys: %s",
-                list(items[0].keys()) if items else [],
-            )
             return items
 
         if attempt < _EMPTY_MAX_RETRIES - 1:
