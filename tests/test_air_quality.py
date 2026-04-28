@@ -175,8 +175,10 @@ class TestFetchAirQuality(unittest.TestCase):
     @patch("src.air_quality.requests.get")
     def test_handles_invalid_measurement_values(self, mock_get: MagicMock) -> None:
         """측정값이 '-' 또는 None인 경우: pm10/cai는 0, pm25는 None으로 처리한다."""
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = self._api_response(items=[
+        # 1차: 측정소별 API (pm25Value=None)
+        # 2차: 시도별 API (pm25Value도 없음)
+        station_resp = MagicMock()
+        station_resp.json.return_value = self._api_response(items=[
             {
                 "stationName": "서현동",
                 "pm10Value": "-",
@@ -185,14 +187,65 @@ class TestFetchAirQuality(unittest.TestCase):
                 "dataTime": "2026-04-26 07:00",
             }
         ])
-        mock_resp.raise_for_status.return_value = None
-        mock_get.return_value = mock_resp
+        station_resp.raise_for_status.return_value = None
+
+        sido_resp = MagicMock()
+        sido_resp.json.return_value = {
+            "response": {
+                "header": {"resultCode": "00"},
+                "body": {
+                    "items": [
+                        {"stationName": "다른측정소", "pm25Value": "-"},
+                    ]
+                },
+            }
+        }
+        sido_resp.raise_for_status.return_value = None
+
+        mock_get.side_effect = [station_resp, sido_resp]
 
         result = fetch_air_quality("test_key", "경기", "서현동")
         self.assertEqual(result.pm10, 0)
         self.assertIsNone(result.pm25)
         self.assertEqual(result.pm25_grade, "측정없음")
         self.assertEqual(result.cai, 0)
+
+    @patch("src.air_quality.requests.get")
+    def test_pm25_sido_fallback_when_station_has_no_pm25(self, mock_get: MagicMock) -> None:
+        """측정소 24시간 내 PM2.5가 없으면 시도 내 다른 측정소 값으로 fallback한다."""
+        # 1차: 측정소별 API (pm25Value 없음)
+        station_resp = MagicMock()
+        station_resp.json.return_value = self._api_response(items=[
+            {
+                "stationName": "서현동",
+                "pm10Value": "30",
+                "pm25Value": "-",
+                "khaiValue": "60",
+                "dataTime": "2026-04-26 07:00",
+            }
+        ])
+        station_resp.raise_for_status.return_value = None
+
+        # 2차: 시도별 API (다른 측정소 PM2.5 유효값 존재)
+        sido_resp = MagicMock()
+        sido_resp.json.return_value = {
+            "response": {
+                "header": {"resultCode": "00"},
+                "body": {
+                    "items": [
+                        {"stationName": "판교동", "pm25Value": "15"},
+                    ]
+                },
+            }
+        }
+        sido_resp.raise_for_status.return_value = None
+
+        mock_get.side_effect = [station_resp, sido_resp]
+
+        result = fetch_air_quality("test_key", "경기", "서현동")
+        self.assertEqual(result.pm10, 30)
+        self.assertEqual(result.pm25, 15)
+        self.assertEqual(result.pm25_grade, "보통")
 
 
 if __name__ == "__main__":

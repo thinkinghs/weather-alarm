@@ -16,6 +16,10 @@ _STATION_URL = (
     "http://apis.data.go.kr/B552584/ArpltnInforInqireSvc"
     "/getMsrstnAcctoRltmMesureDnsty"
 )
+_SIDO_URL = (
+    "http://apis.data.go.kr/B552584/ArpltnInforInqireSvc"
+    "/getCtprvnRltmMesureDnsty"
+)
 _TIMEOUT = 10
 _MAX_RETRIES = 3
 _EMPTY_RETRY_WAIT = 300  # 빈 데이터 재시도 간격(초) — 아침 업데이트 대기용
@@ -147,6 +151,35 @@ def _fetch_items(api_key: str, station_name: str) -> list[dict]:
     )
 
 
+def _find_pm25_in_sido(api_key: str, sido_name: str) -> str | None:
+    """시도 내 전체 측정소 중 PM2.5 유효값이 있는 첫 번째 측정소 값을 반환한다."""
+    params = {
+        "serviceKey": api_key,
+        "returnType": "json",
+        "numOfRows": 100,
+        "pageNo": 1,
+        "sidoName": sido_name,
+        "searchCondition": "HOUR",
+    }
+    try:
+        body = _call_with_retry(_SIDO_URL, params)
+        result_code = body.get("response", {}).get("header", {}).get("resultCode", "")
+        if result_code != "00":
+            return None
+        items = body.get("response", {}).get("body", {}).get("items") or []
+        for item in items:
+            v = item.get("pm25Value", "")
+            if v and v.strip() != "-":
+                logger.info(
+                    "PM2.5 fallback: using station=%s value=%s",
+                    item.get("stationName"), v,
+                )
+                return v
+    except Exception as exc:
+        logger.warning("PM2.5 sido fallback failed: %s", exc)
+    return None
+
+
 def fetch_air_quality(
     api_key: str,
     sido_name: str,
@@ -154,8 +187,7 @@ def fetch_air_quality(
 ) -> AirQualityData:
     """에어코리아 측정소별 실시간 측정정보 API에서 특정 측정소 데이터를 조회한다.
 
-    최근 24시간 데이터를 조회해 PM2.5 등 미갱신 항목은 가장 최근 유효값을 사용한다.
-    sido_name은 에러 메시지용으로만 유지한다.
+    PM2.5가 24시간 내 모두 누락("-")이면 시도 내 다른 측정소에서 fallback으로 가져온다.
     """
     items = _fetch_items(api_key, station_name)
 
@@ -169,6 +201,10 @@ def fetch_air_quality(
         if v and v.strip() != "-":
             pm25_raw = v
             break
+
+    # 24시간 내 PM2.5가 모두 없으면 시도 전체 측정소에서 fallback 탐색
+    if pm25_raw is None and sido_name:
+        pm25_raw = _find_pm25_in_sido(api_key, sido_name)
 
     pm10 = _safe_int(station_data.get("pm10Value"))
     pm25 = _parse_optional_int(pm25_raw)
