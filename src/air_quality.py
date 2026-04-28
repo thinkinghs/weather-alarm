@@ -165,16 +165,29 @@ def _find_pm25_in_sido(api_key: str, sido_name: str) -> str | None:
         body = _call_with_retry(_SIDO_URL, params)
         result_code = body.get("response", {}).get("header", {}).get("resultCode", "")
         if result_code != "00":
+            logger.warning("PM2.5 sido fallback: API error resultCode=%s", result_code)
             return None
         items = body.get("response", {}).get("body", {}).get("items") or []
-        for item in items:
-            v = item.get("pm25Value", "")
-            if v and v.strip() != "-":
-                logger.info(
-                    "PM2.5 fallback: using station=%s value=%s",
-                    item.get("stationName"), v,
-                )
-                return v
+        # 중첩 구조 정규화
+        if isinstance(items, dict):
+            items = items.get("item") or []
+        if isinstance(items, dict):
+            items = [items]
+        pm25_values = [item.get("pm25Value", "") for item in items]
+        valid_values = [v for v in pm25_values if v and v.strip() != "-"]
+        logger.info(
+            "PM2.5 sido fallback: sido=%s total_stations=%d valid_pm25=%d",
+            sido_name, len(items), len(valid_values),
+        )
+        if valid_values:
+            for item in items:
+                v = item.get("pm25Value", "")
+                if v and v.strip() != "-":
+                    logger.info(
+                        "PM2.5 fallback: using station=%s value=%s",
+                        item.get("stationName"), v,
+                    )
+                    return v
     except Exception as exc:
         logger.warning("PM2.5 sido fallback failed: %s", exc)
     return None
